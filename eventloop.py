@@ -36,17 +36,21 @@ class EventLoop:
         self.task_queue = Queue()
         self.coroutines = []
         self.task_to_coroutine = {}
+        self.socket_selector = DefaultSelector()
+        
 
     def register(self, func: Callable):
         coroutine = func()
         # coroutine.send(None)
         self.coroutines.append(coroutine)
     
-    def loop(self):
+    def get_initial_tasks(self):
         for coroutine in self.coroutines:
             task = next(coroutine)
             self.task_to_coroutine[task] = coroutine
-        
+
+    def loop(self):
+        self.get_initial_tasks()
         while True:
             for task, coroutine in list(self.task_to_coroutine.items()):
                 if task.is_complete():
@@ -63,7 +67,7 @@ def coro1():
 def coro2():
     while True:
         print("bye")
-        yield TimedTask(1)
+        yield TimedTask(.1)
 
 
 if __name__ == "__main__":
