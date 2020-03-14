@@ -58,9 +58,9 @@ class ResourceTask:
             print(f"the socket has the following data in it: {socket_with_data_in_it.recv(1000)})
         
         the coroutine will be run, and the resource task will be yielded (point 1). Then, during the event loop's looping to check whether tasks
-        are complete, the resource task will have completed and the coroutine will be run again and it will pass point 2 to get to point 3 where it will 
+        are complete, the resource task will have completed and the coroutine will be run again and it will pass point 1 and 2 to get to point 3 where it will 
         stop again. Thats when the coroutine will be sent the resource it requested. The empty yield in point 3 is used to accept a value passed
-        IN to a generator from outside. This resource 
+        IN to a generator from outside.  
 
         """
         next(coroutine) #get past the first yield
@@ -78,7 +78,7 @@ class ResourceTask:
 class TimedTask:
     """
     A TimedTask is simply used to pause a coroutine for the given delay. The coroutine that 
-    yielded the TimedTask will be resumed after the timestask is complete.
+    yielded the TimedTask will be resumed after the timedtask is complete.
     """
     def __init__(self, delay: int):
         self.delay = delay
@@ -102,11 +102,10 @@ class TimedTask:
 class EventLoop:
     """
     The great event loop. This class is responsible for running coroutines, getting tasks from them, checking whether the tasks
-    are complete, and then resuming the coroutines 
+    are complete, and then resuming the coroutines and passing in any resources the coroutines may need.
     """
 
     def __init__(self):
-
         self.task_to_coroutine = {}
         self.ready_resources = set()
         self.resource_selector = selectors.DefaultSelector()
@@ -127,6 +126,9 @@ class EventLoop:
         return TimedTask(delay)
 
     def loop(self):
+        """
+        This is the meat of the event loop. 
+        """
         self.ready_resources = set(self.resource_selector.select(-1))
         while True:
             for task, coroutine in list(self.task_to_coroutine.items()):
@@ -139,3 +141,23 @@ class EventLoop:
                         self.task_to_coroutine[new_task] = coroutine
 
             self.ready_resources = set(resource_wrapper.fileobj for resource_wrapper, event in self.resource_selector.select(-1))
+
+def read_text(ev):
+    txt_file = open('test.txt')
+    while True:
+        print("yielding resource")
+        yield ev.resource_task(txt_file, 'readable')
+        print("after yielding resource")
+        file_with_data = yield #point 3
+        print(file_with_data.read())
+
+
+
+def main():
+    ev = EventLoop()
+    ev.run_coroutine(read_text, ev)
+    ev.loop()
+
+if __name__ == "__main__":
+    main()
+
