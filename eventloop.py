@@ -1,7 +1,6 @@
 import selectors
 from queue import Queue
-from typing import Callable
-import heapq
+from typing import Callable, Union, Generator
 import datetime
 import socket
 
@@ -25,55 +24,21 @@ class ResourceTask:
         'readable':selectors.EVENT_READ 
     }
 
-    def __init__(self, resource, event: str, event_loop):
+    def __init__(self, resource, event: str):
         """
         a event such as writable or readable along with a resource such as a socket or a file is provided. The resource is registered
         with the event loop so that the event loop can store it in a Selector which it uses to monitor which resources are ready to give back
         to the coroutine that yielded them.
         """
-        self.event_loop = event_loop
         self.resource = resource
+        
         try:
-            event_to_wait_for = self.EVENT_TO_SELECTORS_EVENT[event]
-            self.event_loop.register_resource(resource, event_to_wait_for)
+            self.event = self.EVENT_TO_SELECTORS_EVENT[event]
         except KeyError:
             raise KeyError(f"you did not provide a valid event associated with this resource task. Valid events are {self.EVENT_TO_SELECTORS_EVENT}")
 
-    def is_complete(self) -> bool:
-        """ 
-        Checks whether the resource associated with this task, like a socket, is readable (has data in it that someone else sent) 
-        or writeable (can recieve data). 
-        """
-        return self.resource in self.event_loop.ready_resources
-    
-    def get_new_task(self, coroutine):
-        """
-        After a task is completed, the coroutine is resumed by calling next(coroutine). Coroutines that yield ResourceTasks 
-        have two yield statements. Lets take the following coroutine as an example:
-
-        def gooby():
-            yield event_loop.resource_task(some_socket, 'readable') #point 1
-            print("after the first yield statement) #point 2
-            socket_with_data_in_it = yield #point 3
-            print(f"the socket has the following data in it: {socket_with_data_in_it.recv(1000)})
-        
-        the coroutine will be run, and the resource task will be yielded (point 1). Then, during the event loop's looping to check whether tasks
-        are complete, the resource task will have completed and the coroutine will be run again and it will pass point 1 and 2 to get to point 3 where it will 
-        stop again. Thats when the coroutine will be sent the resource it requested. The empty yield in point 3 is used to accept a value passed
-        IN to a generator from outside.  
-
-        """
-        next(coroutine) #get past the first yield
-        try:
-            self.event_loop.resource_selector.unregister(self.resource) #stop monitoring resource as the event has already happened
-            new_task = coroutine.send(self.resource) #send the resource back to the coroutine that yielded the ResourceTask
-            return new_task
-        except StopIteration: #the coroutine dies if there are no more yields
-            return None
-
     def __str__(self):
         return str(vars(self))
-    
     
 class TimedTask:
     """
@@ -85,24 +50,15 @@ class TimedTask:
         self.delay_time = datetime.timedelta(seconds=delay)
         self.start_time = datetime.datetime.now()
         self.end_time = self.start_time + self.delay_time
-    
-    def is_complete(self) -> bool:
-        return datetime.datetime.now() > self.end_time
-    
-    def get_new_task(self, coroutine):
-        try:
-            new_task = next(coroutine)
-            return new_task
-        except StopIteration:
-            return None
-    
+        
     def __str__(self):
         return str(vars(self))
 
 class EventLoop:
     """
-    The great event loop. This class is responsible for running coroutines, getting tasks from them, checking whether the tasks
-    are complete, and then resuming the coroutines and passing in any resources the coroutines may need.
+    The great event loop. This class is responsible for running coroutines, getting tasks from them, 
+    checking whether the tasks are complete, and then resuming the coroutines and passing in 
+    any resources the coroutines may need.
     """
 
     def __init__(self):
@@ -118,12 +74,33 @@ class EventLoop:
         task = next(coroutine)
         if task:
             self.task_to_coroutine[task] = coroutine
-        
-    def resource_task(self, resource, event: str) -> ResourceTask:
-        return ResourceTask(resource, event, self)
+            if isinstance(task, ResourceTask):
+                self.register_resource(task.resource, task.event)
+    
+    def is_complete(self, task) -> bool:
+        if isinstance(task, ResourceTask):
+            return self.is_resource_task_complete(task)
+        elif isinstance(task, TimedTask):
+            return self.is_timed_task_complete(task)
+        else:
+            raise ValueError(f"task has to be either a resource task or a timed task, got {str(task)}")
+    
+    def is_resource_task_complete(self, resource_task: ResourceTask) -> bool:
+        return resource_task.resource in self.ready_resources
+    
+    def is_timed_task_complete(self, timed_task: TimedTask) -> bool:
+        return datetime.datetime.now() > timed_task.end_time
 
-    def timed_task(self, delay: int) -> TimedTask:
-        return TimedTask(delay)
+    
+    def get_new_task(self, coroutine: Generator, task):
+        if isinstance(task, ResourceTask):
+            self.resource_selector.unregister(task.resource)
+
+        try:
+            new_task = coroutine.send(True)
+            return new_task
+        except StopIteration:
+            return None
 
     def loop(self):
         """
@@ -132,32 +109,19 @@ class EventLoop:
         self.ready_resources = set(self.resource_selector.select(-1))
         while True:
             for task, coroutine in list(self.task_to_coroutine.items()):
-                new_task = None
-                if task.is_complete():
-                    new_task = task.get_new_task(coroutine)
+                if self.is_complete(task):
+                    new_task = self.get_new_task(coroutine, task)
                     del self.task_to_coroutine[task]
-
+                    
                     if new_task:
                         self.task_to_coroutine[new_task] = coroutine
+                        if isinstance(task, ResourceTask):
+                            self.register_resource(task.resource, task.event)
+            if not self.task_to_coroutine:
+                print("all tasks are over, exiting the loop")
+                break
 
             self.ready_resources = set(resource_wrapper.fileobj for resource_wrapper, event in self.resource_selector.select(-1))
 
-def read_text(ev):
-    txt_file = open('test.txt')
-    while True:
-        print("yielding resource")
-        yield ev.resource_task(txt_file, 'readable')
-        print("after yielding resource")
-        file_with_data = yield #point 3
-        print(file_with_data.read())
 
-
-
-def main():
-    ev = EventLoop()
-    ev.run_coroutine(read_text, ev)
-    ev.loop()
-
-if __name__ == "__main__":
-    main()
 
