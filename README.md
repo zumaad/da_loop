@@ -69,6 +69,7 @@ remember the following operation numbers are where you can potentially be forced
 imagine if before trying to do those troublesome operations we could ask the eventloop if the socket was readable/writable and only move forward in the generator if it was. We can ask the event loop this by yielding the resource which the event loop will get as its calling next() on the generator. Then when the event loop sees the socket is readable/writable (using the select system call) it 
 calls next() on the generator which moves it forward and actually does the reading/writing operation. For example
 
+```
 def service_client(client_socket):
     yield client_socket
     data = client_socket.read()
@@ -83,6 +84,7 @@ def service_client(client_socket):
 
     yield client_socket
     client_socket.send(response)
+```
 
 So lets say you have the function/generator above and you tell the event loop to run it. The event loop 
 starts running it, calls next() on it, gets the client socket and adds it to its selector. Then it calls selector.select() and the client socket is still unreadable, so the event loop loops again and calls selector.select() and this time the client socket is readable, so it calls next() on the service_client generator which then executes client_socket.read() and stops at the yield server2_socket line. So essentially, you pause the function until the resource it requests is readable/writable. This can be achived quite easily by having some sort of mapping between a yielded resource/socket and the generator that yielded it. That way the event loop is essentially a while true loop that keeps track of all the readable/writable sockets and a mapping of yielded socket/resource to the generator that yielded it. It can then iterate through the mapping, see whether the yielded socket is in the collection of readable/wrtiable sockets, and if it is, call next() on the associated generator and so on. 
