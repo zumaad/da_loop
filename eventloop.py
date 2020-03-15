@@ -1,5 +1,4 @@
 import selectors
-from queue import Queue
 from typing import Callable, Union, Generator
 import datetime
 import socket
