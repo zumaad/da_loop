@@ -17,7 +17,9 @@ def read_from_other_resource():
 def wait_for_other_coroutine():
     """ 
     yield from chains together generators so that when the event loop passes values
-    to the outside generator, that value goes to the inner coro. 
+    to the outside generator, that value goes to the inner coro. Essentially, the event loop treats
+    it as if they are the same coroutine, just that the body if the inner coroutine you are yielding from is
+    inside the outer coroutine's body.
     """
     
     print("before other coroutine")
@@ -35,8 +37,8 @@ def read_text():
 
 def main():
     ev = EventLoop()
-    ev.run_coroutine(timed_print)
-    ev.run_coroutine(read_text)
+    #ev.run_coroutine(timed_print)
+    #ev.run_coroutine(read_text)
     ev.run_coroutine(wait_for_other_coroutine)
     ev.loop()
 
