@@ -121,7 +121,7 @@ class EventLoop:
                     if new_task:
                         self.task_to_coroutine[new_task] = coroutine
                         if isinstance(task, ResourceTask):
-                            self.register_resource(task.resource, task.event)
+                            self.register_resource(new_task.resource, new_task.event)
             if not self.task_to_coroutine:
                 print("all tasks are over, exiting the loop")
                 break

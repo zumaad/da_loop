@@ -35,11 +35,17 @@ def read_text():
         txt_file.seek(0)
         print(txt_file.read())
 
+def writable():
+    txt_file = open('test.txt')
+    yield ResourceTask(txt_file, 'writable')
+    print("it is writable")
+
 def main():
     ev = EventLoop()
     #ev.run_coroutine(timed_print)
     #ev.run_coroutine(read_text)
-    ev.run_coroutine(wait_for_other_coroutine)
+    #ev.run_coroutine(wait_for_other_coroutine)
+    ev.run_coroutine(writable)
     ev.loop()
 
 if __name__ == "__main__":
